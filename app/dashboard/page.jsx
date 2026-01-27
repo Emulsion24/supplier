@@ -4,10 +4,10 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation'; 
 import { 
   Sun, LogOut, Package, Plus, Trash2, X, Edit2, 
-  ArrowLeft, ArrowRight, MapPin, Save, FileText 
+  ArrowLeft, ArrowRight, MapPin, Save, FileText, UploadCloud
 } from 'lucide-react';
 
-// ... (Keep INITIAL_DATA and STATIC_ROWS exactly as they were) ...
+// --- INITIAL DATA ---
 const INITIAL_DATA = [
   {
     id: 1,
@@ -17,10 +17,11 @@ const INITIAL_DATA = [
     power: 700,
     moq: "1 MWp",
     qty: 25,
+    city: "Mumbai", 
     validity: "2026-06-30",
     availability: 7,
-    datasheet: "PDF",
-    panfile: ".pan",
+    datasheet: "datasheet_v1.pdf",
+    panfile: "module.pan",
     priceEx: 24.2,
     price_location_Kolkata: 28
   },
@@ -32,25 +33,28 @@ const INITIAL_DATA = [
     power: 660,
     moq: "1 MWp",
     qty: 15,
+    city: "Delhi", 
     validity: "2026-06-30",
     availability: 10,
-    datasheet: "PDF",
-    panfile: ".pan",
+    datasheet: "datasheet_v2.pdf",
+    panfile: "module_v2.pan",
     priceEx: 23.8
   }
 ];
 
-const STATIC_ROWS = [
-  { id: 'technology', label: 'Module Technology', type: 'text' },
-  { id: 'type', label: 'Type', type: 'select', options: ['n-type', 'p-type'] },
-  { id: 'power', label: 'Power (Wp)', type: 'number' },
-  { id: 'moq', label: 'Minimum order quantity', type: 'text' },
-  { id: 'qty', label: 'Qty (MW)', type: 'number' },
-  { id: 'validity', label: 'Validity', type: 'date' },
-  { id: 'availability', label: 'Availability within Days', type: 'number' },
-  { id: 'datasheet', label: 'Datasheet', type: 'file' },
-  { id: 'panfile', label: 'pan-file', type: 'file' },
-  { id: 'priceEx', label: 'Price Ex-factory (₹/Wp)', type: 'number' },
+// Added 'isFixed: true' to protect original rows
+const INITIAL_ROWS = [
+  { id: 'technology', label: 'Module Technology', type: 'text', isFixed: true },
+  { id: 'type', label: 'Type', type: 'select', options: ['n-type', 'p-type'], isFixed: true },
+  { id: 'power', label: 'Power (Wp)', type: 'number', isFixed: true },
+  { id: 'moq', label: 'Minimum order quantity', type: 'text', isFixed: true },
+  { id: 'qty', label: 'Qty (MW)', type: 'number', isFixed: true },
+  { id: 'city', label: 'Stock Location', type: 'text', isFixed: true },
+  { id: 'validity', label: 'Validity', type: 'date', isFixed: true },
+  { id: 'availability', label: 'Availability within Days', type: 'number', isFixed: true },
+  { id: 'datasheet', label: 'Datasheet', type: 'file', isFixed: true },
+  { id: 'panfile', label: 'pan-file', type: 'file', isFixed: true },
+  { id: 'priceEx', label: 'Price Ex-factory (₹/Wp)', type: 'number', isFixed: true },
 ];
 
 export default function DashboardPage() {
@@ -59,30 +63,25 @@ export default function DashboardPage() {
   // --- STATE ---
   const [user, setUser] = useState(null); 
   const [localProducts, setLocalProducts] = useState(INITIAL_DATA);
+  const [rows, setRows] = useState(INITIAL_ROWS); // Converted to State
   const [locations, setLocations] = useState(['Kolkata']); 
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [newCol, setNewCol] = useState({});
   const [loading, setLoading] = useState(true);
 
-  // --- 1. AUTH CHECK ON MOUNT (FIXED) ---
+  // --- 1. AUTH CHECK ---
   useEffect(() => {
-    // Check if user is logged in
     const storedUser = localStorage.getItem('currentUser');
-    
     if (!storedUser) {
-      router.push('/'); // Redirect to Login if not found
+      router.push('/'); 
     } else {
-      // Only set user if not already set to avoid redundant renders
       setUser(JSON.parse(storedUser));
       setLoading(false);
     }
-    
-    // Pass empty array to ensure this runs ONLY once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
 
-  // --- 2. LOGOUT FUNCTION ---
   const handleLogout = () => {
     localStorage.removeItem('currentUser'); 
     router.push('/'); 
@@ -104,6 +103,27 @@ export default function DashboardPage() {
     if (city && !locations.includes(city)) setLocations([...locations, city]);
   };
 
+  // --- NEW: Handle Adding/Removing Rows ---
+  const handleAddRow = () => {
+    const label = prompt("Enter Parameter Name (e.g., Warranty, Frame Color):");
+    if (!label) return;
+    
+    // Simple ID generation based on label
+    const id = label.toLowerCase().replace(/\s+/g, '_') + '_' + Date.now();
+    
+    // Ask for type (simplified for UX)
+    // Defaulting to 'text' but you could add a prompt for type if needed
+    const newRow = { id, label, type: 'text', isFixed: false };
+    setRows([...rows, newRow]);
+  };
+
+  const handleDeleteRow = (rowId) => {
+    if (window.confirm("Delete this parameter row? Data in this row will be hidden.")) {
+      setRows(rows.filter(r => r.id !== rowId));
+    }
+  };
+  // ----------------------------------------
+
   const startEditing = (p) => { setEditingId(p.id); setEditForm({...p}); };
 
   const saveEditing = () => {
@@ -113,6 +133,16 @@ export default function DashboardPage() {
 
   const handleEditChange = (field, value) => {
     setEditForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleFileChange = (field, file, isNewColumn = false) => {
+    if (file) {
+      if (isNewColumn) {
+        setNewCol(prev => ({ ...prev, [field]: file.name }));
+      } else {
+        setEditForm(prev => ({ ...prev, [field]: file.name }));
+      }
+    }
   };
 
   const handleAddColumn = () => {
@@ -132,7 +162,6 @@ export default function DashboardPage() {
     }
   };
 
-  // Prevent flashing before user loads
   if (loading) return <div className="h-screen w-full flex items-center justify-center bg-slate-50 text-slate-400">Loading Dashboard...</div>;
 
   return (
@@ -181,13 +210,26 @@ export default function DashboardPage() {
                 <div className="bg-white">
                     <div className="h-12 px-5 border-b border-slate-100 flex items-center text-sm font-semibold text-slate-700 bg-white">Product Name</div>
                     
-                    {STATIC_ROWS.map((row, i) => (
-                        <div key={row.id} className={`h-12 px-5 border-b border-slate-100 flex items-center text-xs font-medium text-slate-500 hover:bg-slate-50 transition-colors ${i % 2 === 0 ? 'bg-slate-[5px]' : ''}`}>
-                        {row.label}
+                    {rows.map((row, i) => (
+                        <div key={row.id} className={`h-12 px-5 border-b border-slate-100 flex items-center justify-between text-xs font-medium text-slate-500 hover:bg-slate-50 transition-colors ${i % 2 === 0 ? 'bg-slate-[5px]' : ''}`}>
+                            <span>{row.label}</span>
+                            {/* Only show delete button for non-fixed rows */}
+                            {!row.isFixed && (
+                                <button onClick={() => handleDeleteRow(row.id)} className="text-slate-300 hover:text-red-500 transition-colors p-1">
+                                    <Trash2 size={12}/>
+                                </button>
+                            )}
                         </div>
                     ))}
+                    
+                    {/* Add Parameter Button */}
+                    <div className="px-5 py-2 border-b border-slate-100 bg-slate-50/50">
+                         <button onClick={handleAddRow} className="w-full py-1.5 border border-dashed border-slate-300 text-slate-500 text-[10px] font-bold rounded hover:bg-white hover:border-blue-300 hover:text-blue-600 flex items-center justify-center gap-1 transition-all">
+                            <Plus size={10}/> Add Param
+                        </button>
+                    </div>
 
-                    <div className="px-5 py-3 bg-orange-50/50 border-b border-orange-100 flex flex-col gap-1 mt-4">
+                    <div className="px-5 py-3 bg-orange-50/50 border-b border-orange-100 flex flex-col gap-1 mt-0">
                         <span className="text-[10px] font-bold text-orange-700 uppercase tracking-wider flex items-center gap-1"><MapPin size={10}/> Location Pricing</span>
                     </div>
 
@@ -250,24 +292,41 @@ export default function DashboardPage() {
                             )}
                         </div>
 
-                        {STATIC_ROWS.map(row => (
+                        {rows.map(row => (
                             <div key={row.id} className="h-12 px-2 border-b border-slate-100 flex items-center justify-center text-xs text-slate-600 text-center relative group-cell">
                             {isEditing ? (
+                                // --- EDIT MODE ---
                                 row.type === 'select' ? (
                                     <select className="w-full text-center text-xs p-1 bg-white border border-blue-200 rounded focus:ring-2 focus:ring-blue-100 outline-none" value={data[row.id] || ''} onChange={e => handleEditChange(row.id, e.target.value)}>
                                         {row.options.map(o => <option key={o} value={o}>{o}</option>)}
                                     </select>
+                                ) : row.type === 'file' ? (
+                                    <div className="w-full relative group">
+                                         <label className="w-full cursor-pointer flex items-center justify-center gap-1 text-[9px] bg-blue-50 text-blue-600 px-2 py-1.5 rounded border border-blue-100 hover:bg-blue-100 transition-colors">
+                                            <UploadCloud size={10} />
+                                            <span className="truncate max-w-[80px]">{data[row.id] || 'Upload'}</span>
+                                            <input 
+                                                type="file" 
+                                                className="hidden" 
+                                                onChange={e => handleFileChange(row.id, e.target.files[0])}
+                                            />
+                                        </label>
+                                    </div>
                                 ) : (
                                     <input 
-                                        type={row.type === 'number' ? 'number' : 'text'}
+                                        type={row.type === 'number' ? 'number' : row.type === 'date' ? 'date' : 'text'}
                                         className="w-full text-center text-xs p-1 bg-white border-b border-blue-200 focus:border-blue-500 outline-none"
                                         value={data[row.id] || ''}
                                         onChange={e => handleEditChange(row.id, e.target.value)}
                                     />
                                 )
                             ) : (
+                                // --- VIEW MODE ---
                                 row.type === 'file' ? (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 text-blue-600 text-[10px] font-medium cursor-pointer hover:bg-blue-100"><FileText size={10}/> {row.id === 'datasheet' ? 'PDF' : '.PAN'}</span>
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 text-blue-600 text-[10px] font-medium cursor-pointer hover:bg-blue-100 truncate max-w-full">
+                                        <FileText size={10}/> 
+                                        <span className="truncate">{data[row.id] || 'No File'}</span>
+                                    </span>
                                 ) : (
                                     <span className="truncate w-full px-1">{data[row.id] || '-'}</span>
                                 )
@@ -276,6 +335,7 @@ export default function DashboardPage() {
                         ))}
 
                         <div className="h-[65px] bg-orange-50/20 border-b border-orange-100/50 flex items-center justify-center">
+                            {/* Adjusted spacer height to match potential new rows */}
                             <span className="text-[9px] text-orange-300 font-mono">---</span>
                         </div>
 
@@ -315,19 +375,32 @@ export default function DashboardPage() {
                    <div className="h-12 flex items-center">
                         <input className="w-full text-center text-xs p-2 bg-white border border-slate-300 rounded shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none" placeholder="Enter Name..." value={newCol.name || ''} onChange={e => setNewCol({...newCol, name: e.target.value})} />
                    </div>
-                   {STATIC_ROWS.map(row => (
+                   {rows.map(row => (
                       <div key={row.id} className="h-12 flex items-center">
                          {row.type === 'select' ? (
                              <select className="w-full text-xs p-2 bg-white border border-slate-200 rounded focus:border-blue-400 outline-none text-slate-500" value={newCol[row.id] || ''} onChange={e => setNewCol({...newCol, [row.id]: e.target.value})}>
                                  <option value="">{row.label}</option>
                                  {row.options.map(o => <option key={o} value={o}>{o}</option>)}
                              </select>
+                         ) : row.type === 'file' ? (
+                            // ENABLED FILE UPLOAD IN NEW COLUMN
+                            <label className="w-full h-8 cursor-pointer flex items-center justify-center gap-2 text-xs bg-white border border-dashed border-slate-300 rounded hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600 transition-all text-slate-400">
+                                <UploadCloud size={14} />
+                                <span className="truncate max-w-[100px]">{newCol[row.id] || 'Upload File'}</span>
+                                <input 
+                                    type="file" 
+                                    className="hidden" 
+                                    onChange={e => handleFileChange(row.id, e.target.files[0], true)}
+                                />
+                            </label>
                          ) : (
-                             <input className="w-full text-center text-xs p-2 bg-white border border-slate-200 rounded focus:border-blue-400 outline-none" placeholder={row.label} value={newCol[row.id] || ''} onChange={e => setNewCol({...newCol, [row.id]: e.target.value})} type={row.type === 'number' ? 'number' : 'text'}/>
+                             <input className="w-full text-center text-xs p-2 bg-white border border-slate-200 rounded focus:border-blue-400 outline-none" placeholder={row.label} value={newCol[row.id] || ''} onChange={e => setNewCol({...newCol, [row.id]: e.target.value})} type={row.type === 'number' ? 'number' : row.type === 'date' ? 'date' : 'text'}/>
                          )}
                       </div>
                    ))}
-                   <button onClick={handleAddColumn} className="mt-6 w-full py-3 bg-slate-800 text-white rounded-lg shadow-lg hover:bg-slate-700 hover:shadow-xl transition-all flex items-center justify-center gap-2 text-xs font-bold tracking-wide transform active:scale-95"><Plus size={14}/> ADD COLUMN</button>
+                   {/* Spacer for button position */}
+                   <div className="h-4"></div> 
+                   <button onClick={handleAddColumn} className="w-full py-3 bg-slate-800 text-white rounded-lg shadow-lg hover:bg-slate-700 hover:shadow-xl transition-all flex items-center justify-center gap-2 text-xs font-bold tracking-wide transform active:scale-95"><Plus size={14}/> ADD COLUMN</button>
                 </div>
             </div>
 
