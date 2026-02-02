@@ -6,81 +6,100 @@ import {
   Sun, LogOut, Package, Plus, Trash2, X, Edit2, 
   ArrowLeft, ArrowRight, MapPin, Save, FileText, UploadCloud
 } from 'lucide-react';
+import { ProductData, RowDefinition, DashboardResponse } from '@/types'; // Import types
 
-// --- INITIAL DATA ---
-const INITIAL_DATA = [
-  {
-    id: 1,
-    name: "Product 1",
-    technology: "TOPCon",
-    type: "n-type",
-    power: 700,
-    moq: "1 MWp",
-    qty: 25,
-    city: "Mumbai", 
-    validity: "2026-06-30",
-    availability: 7,
-    datasheet: "datasheet_v1.pdf",
-    panfile: "module.pan",
-    priceEx: 24.2,
-    price_location_Kolkata: 28
-  },
-  {
-    id: 2,
-    name: "Product 2",
-    technology: "TOPCon, half-cut",
-    type: "n-type",
-    power: 660,
-    moq: "1 MWp",
-    qty: 15,
-    city: "Delhi", 
-    validity: "2026-06-30",
-    availability: 10,
-    datasheet: "datasheet_v2.pdf",
-    panfile: "module_v2.pan",
-    priceEx: 23.8
-  }
-];
-
-// Added 'isFixed: true' to protect original rows
-const INITIAL_ROWS = [
-  { id: 'technology', label: 'Module Technology', type: 'text', isFixed: true },
-  { id: 'type', label: 'Type', type: 'select', options: ['n-type', 'p-type'], isFixed: true },
-  { id: 'power', label: 'Power (Wp)', type: 'number', isFixed: true },
-  { id: 'moq', label: 'Minimum order quantity', type: 'text', isFixed: true },
-  { id: 'qty', label: 'Qty (MW)', type: 'number', isFixed: true },
-  { id: 'city', label: 'Stock Location', type: 'text', isFixed: true },
-  { id: 'validity', label: 'Validity', type: 'date', isFixed: true },
-  { id: 'availability', label: 'Availability within Days', type: 'number', isFixed: true },
-  { id: 'datasheet', label: 'Datasheet', type: 'file', isFixed: true },
-  { id: 'panfile', label: 'pan-file', type: 'file', isFixed: true },
-  { id: 'priceEx', label: 'Price Ex-factory (₹/Wp)', type: 'number', isFixed: true },
-];
+// Helper type for the user object
+interface User {
+  id: string | number;
+  companyName: string;
+}
 
 export default function DashboardPage() {
   const router = useRouter(); 
   
-  // --- STATE ---
-  const [user, setUser] = useState(null); 
-  const [localProducts, setLocalProducts] = useState(INITIAL_DATA);
-  const [rows, setRows] = useState(INITIAL_ROWS); // Converted to State
-  const [locations, setLocations] = useState(['Kolkata']); 
-  const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({});
-  const [newCol, setNewCol] = useState({});
+  // --- STATE WITH TYPES ---
+  const [user, setUser] = useState<User | null>(null); 
+  const [localProducts, setLocalProducts] = useState<ProductData[]>([]);
+  const [rows, setRows] = useState<RowDefinition[]>([]); 
+  const [locations, setLocations] = useState<string[]>([]); 
+  
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<Partial<ProductData>>({});
+  const [newCol, setNewCol] = useState<Partial<ProductData>>({});
+  
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // --- 1. AUTH CHECK ---
-  useEffect(() => {
+  // --- API HELPER (Fixed 'any' types) ---
+ const apiCall = async (action: string, data: Record<string, unknown>) => {
+  try {
+    // 1. Get the current user from LocalStorage
     const storedUser = localStorage.getItem('currentUser');
     if (!storedUser) {
-      router.push('/'); 
-    } else {
-      setUser(JSON.parse(storedUser));
-      setLoading(false);
+      alert("You are not logged in.");
+      return null;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); 
+    
+    const parsedUser = JSON.parse(storedUser);
+    
+    // 2. Add supplierId to the payload
+    const requestData = { 
+        ...data, 
+        supplierId: parsedUser.id 
+    };
+
+    // 3. Send to Backend
+    const res = await fetch('/api/supplierdashboard', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, data: requestData }),
+    });
+
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || "API Action Failed");
+    
+    return result;
+  } catch (err: unknown) {
+    console.error(err);
+    // Safe error handling for TypeScript
+    const message = err instanceof Error ? err.message : "An unknown error occurred";
+    alert(`Error: ${message}`);
+    return null;
+  }
+};
+
+  // --- 1. INITIAL LOAD ---
+  useEffect(() => {
+    const init = async () => {
+      // 1. Auth Check & Get User ID
+      const storedUser = localStorage.getItem('currentUser');
+      if (!storedUser) {
+        router.push('/'); 
+        return;
+      }
+      
+      const parsedUser: User = JSON.parse(storedUser);
+      setUser(parsedUser);
+
+      // 2. Fetch Data
+      try {
+        const res = await fetch(`/api/supplierdashboard?supplierId=${parsedUser.id}`);
+        
+        if (!res.ok) throw new Error("Failed to fetch dashboard");
+        
+        const data: DashboardResponse = await res.json();
+        setLocalProducts(data.products || []);
+        setRows(data.rows || []);
+        setLocations(data.locations || []);
+      } catch (e) {
+        console.error("Failed to load dashboard data", e);
+        setErrorMsg("Could not load dashboard data. Please refresh.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    init();
+  }, [router]);
 
   const handleLogout = () => {
     localStorage.removeItem('currentUser'); 
@@ -88,7 +107,8 @@ export default function DashboardPage() {
   };
 
   // --- HANDLERS ---
-  const moveProduct = (index, direction) => {
+  
+  const moveProduct = (index: number, direction: 'left' | 'right') => {
     const newItems = [...localProducts];
     if (direction === 'left' && index > 0) {
       [newItems[index - 1], newItems[index]] = [newItems[index], newItems[index - 1]];
@@ -98,71 +118,134 @@ export default function DashboardPage() {
     setLocalProducts(newItems);
   };
 
-  const handleAddLocation = () => {
+  const handleAddLocation = async () => {
     const city = prompt("Enter City Name (e.g., Mumbai, Delhi):");
-    if (city && !locations.includes(city)) setLocations([...locations, city]);
+    if (city && !locations.includes(city)) {
+        const updatedLocs = [...locations, city];
+        
+        // Optimistic UI Update
+        setLocations(updatedLocs);
+        
+        // API Sync
+        const success = await apiCall('update_settings', { key: 'locations', value: updatedLocs });
+        if (!success) setLocations(locations); // Revert on failure
+    }
   };
 
-  // --- NEW: Handle Adding/Removing Rows ---
-  const handleAddRow = () => {
+  const handleAddRow = async () => {
     const label = prompt("Enter Parameter Name (e.g., Warranty, Frame Color):");
     if (!label) return;
     
-    // Simple ID generation based on label
     const id = label.toLowerCase().replace(/\s+/g, '_') + '_' + Date.now();
+    const newRow: RowDefinition = { id, label, type: 'text', isFixed: false };
     
-    // Ask for type (simplified for UX)
-    // Defaulting to 'text' but you could add a prompt for type if needed
-    const newRow = { id, label, type: 'text', isFixed: false };
-    setRows([...rows, newRow]);
+    const updatedRows = [...rows, newRow];
+    setRows(updatedRows);
+    
+    const success = await apiCall('update_settings', { key: 'rows', value: updatedRows });
+    if (!success) setRows(rows); // Revert
   };
 
-  const handleDeleteRow = (rowId) => {
+  const handleDeleteRow = async (rowId: string) => {
     if (window.confirm("Delete this parameter row? Data in this row will be hidden.")) {
-      setRows(rows.filter(r => r.id !== rowId));
+      const oldRows = [...rows];
+      const updatedRows = rows.filter(r => r.id !== rowId);
+      setRows(updatedRows);
+      
+      const success = await apiCall('update_settings', { key: 'rows', value: updatedRows });
+      if (!success) setRows(oldRows); // Revert
     }
   };
-  // ----------------------------------------
 
-  const startEditing = (p) => { setEditingId(p.id); setEditForm({...p}); };
-
-  const saveEditing = () => {
-    setLocalProducts(localProducts.map(p => p.id === editForm.id ? editForm : p));
-    setEditingId(null);
+  const startEditing = (p: ProductData) => { 
+    setEditingId(p.id); 
+    setEditForm({...p}); 
   };
 
-  const handleEditChange = (field, value) => {
+  const saveEditing = async () => {
+    if (!editForm.id) return;
+
+    // Optimistic Update
+    const oldProducts = [...localProducts];
+    setLocalProducts(localProducts.map(p => p.id === editForm.id ? (editForm as ProductData) : p));
+    setEditingId(null);
+    
+    // API Call (Cast editForm to Record<string, unknown> for strict typing)
+    const success = await apiCall('update_product', editForm as Record<string, unknown>);
+    if (!success) setLocalProducts(oldProducts); // Revert
+  };
+
+  const handleEditChange = (field: string, value: string | number) => {
     setEditForm(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleFileChange = (field, file, isNewColumn = false) => {
-    if (file) {
+// ... inside DashboardPage component
+
+  const handleFileChange = async (field: string, file: File | undefined, isNewColumn = false) => {
+    if (!file) return;
+
+    try {
+      // 1. Get the Presigned URL from your backend
+      const res = await fetch('/api/upload/s3', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, fileType: file.type }),
+      });
+
+      const { uploadUrl, fileUrl } = await res.json();
+
+      // 2. Upload the file directly to AWS S3
+      const upload = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      });
+
+      if (!upload.ok) throw new Error('Upload to S3 failed');
+
+      // 3. Save the *file URL* to your state (instead of just the name)
       if (isNewColumn) {
-        setNewCol(prev => ({ ...prev, [field]: file.name }));
+        setNewCol(prev => ({ ...prev, [field]: fileUrl }));
       } else {
-        setEditForm(prev => ({ ...prev, [field]: file.name }));
+        setEditForm(prev => ({ ...prev, [field]: fileUrl }));
       }
+
+    } catch (error) {
+      console.error(error);
+      alert('File upload failed. Please try again.');
     }
   };
 
-  const handleAddColumn = () => {
+  const handleAddColumn = async () => {
     if (!newCol.name) return alert("Please enter a product name");
-    const newProduct = {
+    
+    const newProduct: Partial<ProductData> = {
       ...newCol,
-      id: Date.now(),
       supplier: user?.companyName || "My Company",
     };
-    setLocalProducts([...localProducts, newProduct]);
-    setNewCol({});
+
+    const res = await apiCall('create_product', newProduct as Record<string, unknown>);
+    
+    if (res && res.success) {
+        // Add the returned ID to the local state
+        const completeProduct = { ...newProduct, id: res.newId } as ProductData;
+        setLocalProducts([...localProducts, completeProduct]);
+        setNewCol({});
+    }
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id: number) => {
     if(window.confirm("Delete this product?")) {
+        const oldProducts = [...localProducts];
         setLocalProducts(localProducts.filter(p => p.id !== id));
+        
+        const success = await apiCall('delete_product', { id });
+        if (!success) setLocalProducts(oldProducts); // Revert
     }
   };
 
   if (loading) return <div className="h-screen w-full flex items-center justify-center bg-slate-50 text-slate-400">Loading Dashboard...</div>;
+  if (errorMsg) return <div className="h-screen w-full flex flex-col items-center justify-center bg-red-50 text-red-500">Error: {errorMsg} <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-red-600 text-white rounded">Retry</button></div>;
 
   return (
     <div className="w-full h-screen bg-slate-50 flex flex-col font-sans text-slate-800 overflow-hidden">
@@ -174,7 +257,8 @@ export default function DashboardPage() {
             <Sun size={18} className="text-white" />
           </div>
           <div>
-            <h1 className="font-bold text-base tracking-tight leading-none">SolarChain Ops</h1>
+            {/* NAME CHANGED HERE */}
+            <h1 className="font-bold text-base tracking-tight leading-none">Rezillion Supplier</h1>
             <p className="text-[10px] text-slate-400 font-medium tracking-wide">SUPPLIER DASHBOARD • {user?.companyName || 'Guest'}</p>
           </div>
         </div>
@@ -213,7 +297,6 @@ export default function DashboardPage() {
                     {rows.map((row, i) => (
                         <div key={row.id} className={`h-12 px-5 border-b border-slate-100 flex items-center justify-between text-xs font-medium text-slate-500 hover:bg-slate-50 transition-colors ${i % 2 === 0 ? 'bg-slate-[5px]' : ''}`}>
                             <span>{row.label}</span>
-                            {/* Only show delete button for non-fixed rows */}
                             {!row.isFixed && (
                                 <button onClick={() => handleDeleteRow(row.id)} className="text-slate-300 hover:text-red-500 transition-colors p-1">
                                     <Trash2 size={12}/>
@@ -222,7 +305,6 @@ export default function DashboardPage() {
                         </div>
                     ))}
                     
-                    {/* Add Parameter Button */}
                     <div className="px-5 py-2 border-b border-slate-100 bg-slate-50/50">
                          <button onClick={handleAddRow} className="w-full py-1.5 border border-dashed border-slate-300 text-slate-500 text-[10px] font-bold rounded hover:bg-white hover:border-blue-300 hover:text-blue-600 flex items-center justify-center gap-1 transition-all">
                             <Plus size={10}/> Add Param
@@ -236,7 +318,6 @@ export default function DashboardPage() {
                     {locations.map(city => (
                         <div key={city} className="h-12 px-5 border-b border-orange-100 flex items-center justify-between text-xs font-medium text-slate-600 bg-orange-50/10 group">
                         <span>Price at {city}</span>
-                        <button className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-400"><X size={10}/></button>
                         </div>
                     ))}
 
@@ -264,8 +345,8 @@ export default function DashboardPage() {
                         </div>
                         
                         <div className="text-center px-1">
-                            <div className="text-sm font-bold text-slate-800 truncate" title={data.name}>{data.name}</div>
-                            <div className="text-[10px] text-slate-400 mt-0.5">{data.technology || 'N/A'}</div>
+                            <div className="text-sm font-bold text-slate-800 truncate" title={String(data.name)}>{String(data.name)}</div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">{String(data.technology || 'N/A')}</div>
                         </div>
 
                         <div className="flex justify-center gap-2 pt-1">
@@ -286,9 +367,9 @@ export default function DashboardPage() {
                     <div>
                         <div className="h-12 p-2 border-b border-slate-100 flex items-center justify-center bg-slate-50/20">
                             {isEditing ? (
-                                <input className="w-full text-center text-xs font-bold bg-white border border-blue-200 rounded px-2 py-1 focus:ring-2 focus:ring-blue-100 outline-none" value={data.name} onChange={e => handleEditChange('name', e.target.value)} />
+                                <input className="w-full text-center text-xs font-bold bg-white border border-blue-200 rounded px-2 py-1 focus:ring-2 focus:ring-blue-100 outline-none" value={String(data.name || '')} onChange={e => handleEditChange('name', e.target.value)} />
                             ) : (
-                                <span className="text-xs font-bold text-slate-700">{data.name}</span>
+                                <span className="text-xs font-bold text-slate-700">{String(data.name || '')}</span>
                             )}
                         </div>
 
@@ -297,18 +378,18 @@ export default function DashboardPage() {
                             {isEditing ? (
                                 // --- EDIT MODE ---
                                 row.type === 'select' ? (
-                                    <select className="w-full text-center text-xs p-1 bg-white border border-blue-200 rounded focus:ring-2 focus:ring-blue-100 outline-none" value={data[row.id] || ''} onChange={e => handleEditChange(row.id, e.target.value)}>
-                                        {row.options.map(o => <option key={o} value={o}>{o}</option>)}
+                                    <select className="w-full text-center text-xs p-1 bg-white border border-blue-200 rounded focus:ring-2 focus:ring-blue-100 outline-none" value={String(data[row.id] || '')} onChange={e => handleEditChange(row.id, e.target.value)}>
+                                        {(row.options || []).map((o: string) => <option key={o} value={o}>{o}</option>)}
                                     </select>
                                 ) : row.type === 'file' ? (
                                     <div className="w-full relative group">
                                          <label className="w-full cursor-pointer flex items-center justify-center gap-1 text-[9px] bg-blue-50 text-blue-600 px-2 py-1.5 rounded border border-blue-100 hover:bg-blue-100 transition-colors">
                                             <UploadCloud size={10} />
-                                            <span className="truncate max-w-[80px]">{data[row.id] || 'Upload'}</span>
+                                            <span className="truncate max-w-[80px]">{String(data[row.id] || 'Upload')}</span>
                                             <input 
                                                 type="file" 
                                                 className="hidden" 
-                                                onChange={e => handleFileChange(row.id, e.target.files[0])}
+                                                onChange={e => handleFileChange(row.id, e.target.files?.[0])}
                                             />
                                         </label>
                                     </div>
@@ -316,7 +397,7 @@ export default function DashboardPage() {
                                     <input 
                                         type={row.type === 'number' ? 'number' : row.type === 'date' ? 'date' : 'text'}
                                         className="w-full text-center text-xs p-1 bg-white border-b border-blue-200 focus:border-blue-500 outline-none"
-                                        value={data[row.id] || ''}
+                                        value={String(data[row.id] || '')}
                                         onChange={e => handleEditChange(row.id, e.target.value)}
                                     />
                                 )
@@ -325,17 +406,16 @@ export default function DashboardPage() {
                                 row.type === 'file' ? (
                                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 text-blue-600 text-[10px] font-medium cursor-pointer hover:bg-blue-100 truncate max-w-full">
                                         <FileText size={10}/> 
-                                        <span className="truncate">{data[row.id] || 'No File'}</span>
+                                        <span className="truncate">{String(data[row.id] || 'No File')}</span>
                                     </span>
                                 ) : (
-                                    <span className="truncate w-full px-1">{data[row.id] || '-'}</span>
+                                    <span className="truncate w-full px-1">{String(data[row.id] || '-')}</span>
                                 )
                             )}
                             </div>
                         ))}
 
                         <div className="h-[65px] bg-orange-50/20 border-b border-orange-100/50 flex items-center justify-center">
-                            {/* Adjusted spacer height to match potential new rows */}
                             <span className="text-[9px] text-orange-300 font-mono">---</span>
                         </div>
 
@@ -349,7 +429,7 @@ export default function DashboardPage() {
                                         <input 
                                             type="number" 
                                             className="w-full text-center text-xs p-1 bg-white border border-orange-200 rounded focus:ring-2 focus:ring-orange-100 outline-none pl-3"
-                                            value={data[fieldKey] || ''}
+                                            value={String(data[fieldKey] || '')}
                                             onChange={e => handleEditChange(fieldKey, e.target.value)}
                                         />
                                     </div>
@@ -373,32 +453,30 @@ export default function DashboardPage() {
 
                 <div className="p-3 space-y-2">
                    <div className="h-12 flex items-center">
-                        <input className="w-full text-center text-xs p-2 bg-white border border-slate-300 rounded shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none" placeholder="Enter Name..." value={newCol.name || ''} onChange={e => setNewCol({...newCol, name: e.target.value})} />
+                        <input className="w-full text-center text-xs p-2 bg-white border border-slate-300 rounded shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none" placeholder="Enter Name..." value={String(newCol.name || '')} onChange={e => setNewCol({...newCol, name: e.target.value})} />
                    </div>
                    {rows.map(row => (
                       <div key={row.id} className="h-12 flex items-center">
                          {row.type === 'select' ? (
-                             <select className="w-full text-xs p-2 bg-white border border-slate-200 rounded focus:border-blue-400 outline-none text-slate-500" value={newCol[row.id] || ''} onChange={e => setNewCol({...newCol, [row.id]: e.target.value})}>
+                             <select className="w-full text-xs p-2 bg-white border border-slate-200 rounded focus:border-blue-400 outline-none text-slate-500" value={String(newCol[row.id] || '')} onChange={e => setNewCol({...newCol, [row.id]: e.target.value})}>
                                  <option value="">{row.label}</option>
-                                 {row.options.map(o => <option key={o} value={o}>{o}</option>)}
+                                 {(row.options || []).map((o: string) => <option key={o} value={o}>{o}</option>)}
                              </select>
                          ) : row.type === 'file' ? (
-                            // ENABLED FILE UPLOAD IN NEW COLUMN
                             <label className="w-full h-8 cursor-pointer flex items-center justify-center gap-2 text-xs bg-white border border-dashed border-slate-300 rounded hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600 transition-all text-slate-400">
                                 <UploadCloud size={14} />
-                                <span className="truncate max-w-[100px]">{newCol[row.id] || 'Upload File'}</span>
+                                <span className="truncate max-w-[100px]">{String(newCol[row.id] || 'Upload File')}</span>
                                 <input 
                                     type="file" 
                                     className="hidden" 
-                                    onChange={e => handleFileChange(row.id, e.target.files[0], true)}
+                                    onChange={e => handleFileChange(row.id, e.target.files?.[0], true)}
                                 />
                             </label>
                          ) : (
-                             <input className="w-full text-center text-xs p-2 bg-white border border-slate-200 rounded focus:border-blue-400 outline-none" placeholder={row.label} value={newCol[row.id] || ''} onChange={e => setNewCol({...newCol, [row.id]: e.target.value})} type={row.type === 'number' ? 'number' : row.type === 'date' ? 'date' : 'text'}/>
+                             <input className="w-full text-center text-xs p-2 bg-white border border-slate-200 rounded focus:border-blue-400 outline-none" placeholder={row.label} value={String(newCol[row.id] || '')} onChange={e => setNewCol({...newCol, [row.id]: e.target.value})} type={row.type === 'number' ? 'number' : row.type === 'date' ? 'date' : 'text'}/>
                          )}
                       </div>
                    ))}
-                   {/* Spacer for button position */}
                    <div className="h-4"></div> 
                    <button onClick={handleAddColumn} className="w-full py-3 bg-slate-800 text-white rounded-lg shadow-lg hover:bg-slate-700 hover:shadow-xl transition-all flex items-center justify-center gap-2 text-xs font-bold tracking-wide transform active:scale-95"><Plus size={14}/> ADD COLUMN</button>
                 </div>
